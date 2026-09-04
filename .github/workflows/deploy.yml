@@ -26,13 +26,17 @@ jobs:
           node-version: 20
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - name: Generate Prisma client (api)
+        run: pnpm --filter api db:generate
       - run: pnpm build
         env:
           NEXT_PUBLIC_API_URL: ${{ secrets.NEXT_PUBLIC_API_URL || vars.NEXT_PUBLIC_API_URL }}
+      - name: Verify static export
+        run: ls -lah apps/web/out && test -f apps/web/out/index.html
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: ./out
+          path: ./apps/web/out
 
   deploy:
     environment:

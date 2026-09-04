@@ -22,6 +22,88 @@ function isEmailAllowed(email: string, allowedDomains: string[], allowedEmails: 
   return allowedEmails.length>0 ? false : true;
 }
 
+function extractMeetCode(meetCode: string | undefined, meetLink: string | undefined): string | null {
+  if (meetCode) return meetCode.split("?")[0].split("#")[0].trim();
+  if (meetLink) {
+    try {
+      const url = new URL(meetLink);
+      const parts = url.pathname.split("/").filter(Boolean);
+      if (parts.length) return parts[parts.length - 1].split("?")[0];
+    } catch {
+      const seg = meetLink.split("/").pop() || null;
+      return seg ? seg.split("?")[0].split("#")[0] : null;
+    }
+  }
+  return null;
+}
+
+async function upsertMeetParticipant(sessionId: string, p: any): Promise<{ imported: boolean }> {
+  const rawName = String(p.rawName || p.name || "").trim();
+  if (!rawName) return { imported: false };
+  const { cleanName, registerNo } = parseMeetName(rawName);
+  const email = p.email ? String(p.email).trim().toLowerCase() : null;
+  let userId: string | null = null;
+  if (registerNo) {
+    const u = await prisma.user.findUnique({ where: { registerNo } });
+    if (u) userId = u.id;
+  }
+  if (!userId && email) {
+    const u = await prisma.user.findFirst({ where: { OR: [{ email }, { vitEmail: email }] } });
+    if (u) userId = u.id;
+  }
+  const joinTime = p.joinTime ? new Date(`1970-01-01T${p.joinTime}`) : (p.lastAttendedTimeStamp ? new Date(p.lastAttendedTimeStamp) : null);
+  const attendedDuration = p.attendedDuration != null ? Number(p.attendedDuration) : (p.duration != null ? Number(p.duration) : null);
+  const isPresent = attendedDuration != null ? attendedDuration > 60 : true;
+  const finalJoin = joinTime && !isNaN(joinTime.getTime()) ? joinTime : null;
+  const leaveTime = p.leaveTime ? new Date(`1970-01-01T${p.leaveTime}`) : null;
+  const finalLeave = leaveTime && !isNaN(leaveTime.getTime()) ? leaveTime : null;
+
+  const existing = registerNo
+    ? await prisma.attendanceRecord.findFirst({ where: { sessionId, registerNo } })
+    : email
+    ? await prisma.attendanceRecord.findFirst({ where: { sessionId, email } })
+    : null;
+
+  if (existing) {
+    await prisma.attendanceRecord.update({
+      where: { id: existing.id },
+      data: {
+        rawName,
+        cleanName,
+        registerNo: registerNo || existing.registerNo,
+        email: email || existing.email,
+        attendedDuration: Math.max(existing.attendedDuration || 0, attendedDuration || 0),
+        isPresent: isPresent || existing.isPresent,
+        userId: userId || existing.userId,
+        joinTime: finalJoin || existing.joinTime,
+        leaveTime: finalLeave || existing.leaveTime,
+      },
+    });
+  } else {
+    let finalEmail: string | null = email;
+    let finalReg: string | null = registerNo;
+    if (!finalEmail && !finalReg) {
+      finalEmail = `unknown-${Buffer.from(rawName).toString("base64").slice(0, 12).toLowerCase()}@unknown.local`;
+    }
+    await prisma.attendanceRecord.create({
+      data: {
+        sessionId,
+        userId,
+        rawName,
+        cleanName,
+        registerNo: finalReg,
+        email: finalEmail,
+        joinTime: finalJoin,
+        leaveTime: finalLeave,
+        attendedDuration: attendedDuration ?? 0,
+        isPresent,
+        source: "MEET_EXTENSION",
+      },
+    });
+  }
+  return { imported: true };
+}
+
 // Zod schemas
 const createInPersonSchema = z.object({
   title: z.string().min(3).max(100),
@@ -36,6 +118,18 @@ const createInPersonSchema = z.object({
   points: z.number().int().min(1).max(1000).optional(),
 });
 
+const meetParticipantSchema = z.object({
+  name: z.string().optional(),
+  rawName: z.string().optional(),
+  email: z.string().optional(),
+  avatarUrl: z.string().optional(),
+  joinTime: z.string().optional(),
+  leaveTime: z.string().optional(),
+  attendedDuration: z.number().optional(),
+  lastAttendedTimeStamp: z.string().optional(),
+  duration: z.union([z.string(), z.number()]).optional(),
+});
+
 const createMeetSchema = z.object({
   title: z.string().min(3).max(100),
   meetLink: z.string().url().optional(),
@@ -46,6 +140,7 @@ const createMeetSchema = z.object({
   categorySlug: z.string().optional(),
   categoryId: z.string().optional(),
   points: z.number().int().min(1).max(1000).optional(),
+  participants: z.array(meetParticipantSchema).optional(),
 });
 
 // POST /api/attendance/in-person – create in-person session + event
@@ -90,7 +185,7 @@ router.post("/in-person", requireAuth, requireRole("ADMIN","SUPER_ADMIN"), async
 router.post("/meet", requireAuth, requireRole("ADMIN","SUPER_ADMIN"), async (req: AuthRequest, res) => {
   const parsed = createMeetSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ success:false, error: parsed.error.flatten() });
-  const { title, meetLink, meetCode, date, startTime, endTime, categorySlug, categoryId, points } = parsed.data;
+  const { title, meetLink, meetCode, date, startTime, endTime, categorySlug, categoryId, points, participants } = parsed.data as any;
   let catId = categoryId;
   if (!catId && categorySlug) {
     const cat = await prisma.category.findUnique({ where:{slug:categorySlug}});
@@ -102,7 +197,7 @@ router.post("/meet", requireAuth, requireRole("ADMIN","SUPER_ADMIN"), async (req
   const endObj = endTime ? new Date(endTime) : null;
   if (isNaN(dateObj.getTime())) return res.status(400).json({ success:false, error:"Invalid date"});
 
-  const code = meetCode || (meetLink ? meetLink.split("/").pop()||null : null);
+  const code = extractMeetCode(meetCode, meetLink);
 
   const session = await prisma.attendanceSession.create({
     data: {
@@ -110,7 +205,19 @@ router.post("/meet", requireAuth, requireRole("ADMIN","SUPER_ADMIN"), async (req
       createdById: req.user!.id, status:"OPEN", categoryId: catId||null, points: points||null,
     }
   });
-  return res.status(201).json({ success:true, data:{ session }});
+
+  // If participants supplied inline (from extension), import them directly
+  let importResult: { imported: number; skipped: number } | null = null;
+  if (Array.isArray(participants) && participants.length > 0) {
+    let imported = 0, skipped = 0;
+    for (const p of participants) {
+      const r = await upsertMeetParticipant(session.id, p);
+      if (r.imported) imported++; else skipped++;
+    }
+    importResult = { imported, skipped };
+  }
+
+  return res.status(201).json({ success:true, data:{ session, participants: importResult }});
 });
 
 // POST /api/attendance/meet/:id/participants – extension bulk upload
@@ -123,56 +230,10 @@ router.post("/meet/:id/participants", requireAuth, requireRole("ADMIN","SUPER_AD
 
   let imported=0, skipped=0;
   for (const p of participants) {
-    const rawName = String(p.rawName || p.name || "").trim();
-    if (!rawName) { skipped++; continue; }
-    const { cleanName, registerNo } = parseMeetName(rawName);
-    const email = p.email ? String(p.email).trim().toLowerCase() : null;
-    // resolve user by registerNo first, then email
-    let userId: string | null = null;
-    if (registerNo) {
-      const u = await prisma.user.findUnique({ where:{registerNo}});
-      if (u) userId = u.id;
-    }
-    if (!userId && email) {
-      const u = await prisma.user.findFirst({ where:{ OR:[{email}, {vitEmail:email}]}});
-      if (u) userId = u.id;
-    }
-    const joinTime = p.joinTime ? new Date(`1970-01-01T${p.joinTime}`) : (p.lastAttendedTimeStamp ? new Date(p.lastAttendedTimeStamp) : null);
-    // better: if joinTime is like "10:20:30" treat as today + time? For now store as is with date = session.date
-    // We will store attendedDuration and mark isPresent if > 50% or > 30min
-    const attendedDuration = p.attendedDuration ? Number(p.attendedDuration) : null;
-    // isPresent heuristic: if duration > 30*60 or > half session? For now if attendedDuration > 1
-    const isPresent = attendedDuration ? attendedDuration > 60 : false; // >1 min
-
-    // upsert by registerNo or email
     try {
-      // Need to handle unique constraints: try find existing first
-      const existing = registerNo ? await prisma.attendanceRecord.findFirst({ where:{ sessionId, registerNo }}) : (email ? await prisma.attendanceRecord.findFirst({ where:{ sessionId, email }}) : null);
-      if (existing) {
-        // update max duration
-        await prisma.attendanceRecord.update({
-          where:{ id: existing.id },
-          data:{
-            rawName, cleanName, registerNo: registerNo||existing.registerNo, email: email||existing.email,
-            attendedDuration: Math.max(existing.attendedDuration||0, attendedDuration||0),
-            isPresent: isPresent || existing.isPresent,
-            userId: userId || existing.userId,
-            joinTime: joinTime || existing.joinTime,
-            leaveTime: p.leaveTime ? new Date(`1970-01-01T${p.leaveTime}`) : existing.leaveTime,
-          }
-        });
-      } else {
-        await prisma.attendanceRecord.create({
-          data:{
-            sessionId, userId, rawName, cleanName, registerNo, email,
-            joinTime: joinTime||null, leaveTime: p.leaveTime ? new Date(`1970-01-01T${p.leaveTime}`) : null,
-            attendedDuration, isPresent, source:"MEET_EXTENSION",
-          }
-        });
-      }
-      imported++;
-    } catch (e:any) {
-      // unique violation on null? skip
+      const r = await upsertMeetParticipant(sessionId, p);
+      if (r.imported) imported++; else skipped++;
+    } catch {
       skipped++;
     }
   }
@@ -307,17 +368,29 @@ router.get("/session/:id/compare", requireAuth, async (req,res)=>{
     return true;
   });
 
-  const unknown = records.filter(r=>!r.userId && !presentRegNos.has(r.registerNo||"") && !r.registerNo);
-  // unknown also includes those with registerNo but no MemberProfile? That's actually absent? But we show as unknown if registerNo not in member list but present
-  const unknownWithRegNo = present.filter(r=>r.registerNo && !allMembers.some(m=>m.registerNo===r.registerNo));
+  const masterRegNos = new Set(allMembers.map(m=>m.registerNo));
+  const masterEmails = new Set(allMembers.map(m=>m.email.toLowerCase()));
+  // unknown = records not linked to a user and not matching any master entry (by regNo or email)
+  // Includes both present and non-present unknowns, deduped
+  const unknownMap = new Map<string, typeof records[number]>();
+  for (const r of records) {
+    if (r.userId) continue;
+    const hasMasterRegNo = !!(r.registerNo && masterRegNos.has(r.registerNo));
+    const hasMasterEmail = !!(r.email && masterEmails.has(r.email.toLowerCase()));
+    if (hasMasterRegNo || hasMasterEmail) continue;
+    // At least one identifier missing from master -> unknown
+    // If both null, it's unknown too (cannot map to master)
+    unknownMap.set(r.id, r);
+  }
+  const unknown = Array.from(unknownMap.values());
 
   res.json({
     success:true,
     data:{
       present: present.map(r=>({ ...r, matched: !!r.userId })),
       absent: absent.map(m=>({ registerNo:m.registerNo, name:m.name, school:m.school, programme:m.programme, email:m.email, isToastmaster:m.isToastmaster, club:m.club, userId:m.userId })),
-      unknown: [...unknown, ...unknownWithRegNo],
-      counts:{ present:present.length, absent: absent.length, unknown: unknown.length + unknownWithRegNo.length, totalRecords: records.length, totalMembers: allMembers.length }
+      unknown,
+      counts:{ present:present.length, absent: absent.length, unknown: unknown.length, totalRecords: records.length, totalMembers: allMembers.length }
     }
   });
 });
@@ -481,10 +554,22 @@ router.post("/session/:id/award", requireAuth, requireRole("ADMIN","SUPER_ADMIN"
   const present = await prisma.attendanceRecord.findMany({ where:{ sessionId:id, isPresent:true, userId:{ not:null }}});
   if (!present.length) return res.status(400).json({ success:false, error:"No present attendees with linked users" });
 
-  // prevent double award: check metadata.sessionId already exists
-  // SQLite doesn't support Json path filter, so filter in JS (works for both SQLite/Postgres)
-  const allPointsForSession = await prisma.point.findMany({ select:{ recipientId:true, metadata:true }});
-  const existingAwards = allPointsForSession.filter(p=> (p.metadata as any)?.sessionId === id);
+  // prevent double award: check metadata.sessionId already exists – scope to present userIds for perf
+  const presentIds = [...new Set(present.map(p=>p.userId).filter(Boolean) as string[])];
+  const relevantPoints = presentIds.length
+    ? await prisma.point.findMany({ where: { recipientId: { in: presentIds } }, select:{ recipientId:true, metadata:true }})
+    : [];
+  const existingAwards = relevantPoints.filter(p=> {
+    const md = p.metadata as any;
+    // metadata may be stringified JSON on SQLite
+    let sid: string | undefined;
+    if (typeof md === "string") {
+      try { sid = JSON.parse(md).sessionId; } catch { sid = undefined; }
+    } else {
+      sid = md?.sessionId;
+    }
+    return sid === id;
+  });
   const alreadyAwarded = new Set(existingAwards.map(p=>p.recipientId));
   const toAward = present.filter(p=>p.userId && !alreadyAwarded.has(p.userId!));
 

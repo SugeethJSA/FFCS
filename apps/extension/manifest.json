@@ -30,7 +30,7 @@
     }
   ],
   "permissions": ["storage"],
-  "host_permissions": ["https://meet.google.com/*", "http://localhost:4000/*", "https://*.ffcs.club/*"],
+  "host_permissions": ["https://meet.google.com/*", "http://localhost:4000/*", "http://localhost:3004/*", "https://*.ffcs.club/*", "https://*.onrender.com/*", "https://*.vercel.app/*", "https://*.pages.dev/*"],
   "icons": {
     "128": "icons/ffcs-logo-128.png",
     "16": "icons/ffcs-logo-16.png",

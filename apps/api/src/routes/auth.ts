@@ -14,13 +14,52 @@ router.post("/register", async (req, res) => {
 
   const { email, username, displayName, password } = parsed.data;
 
-  // Uniqueness check
+  // Check for placeholder user created via FFCS import (isActive=false) – allow claim by email or vitEmail
+  const placeholder = await prisma.user.findFirst({
+    where: {
+      OR: [{ email }, { vitEmail: email }],
+      isActive: false,
+    },
+  });
+
+  if (placeholder) {
+    // Ensure requested username is not taken by another active user (excluding placeholder itself)
+    const usernameTaken = await prisma.user.findFirst({
+      where: { username, NOT: { id: placeholder.id } },
+      select: { id: true },
+    });
+    if (usernameTaken) {
+      return res.status(409).json({ success: false, error: "username already taken" });
+    }
+    const passwordHash = await hashPassword(password);
+    const claimed = await prisma.user.update({
+      where: { id: placeholder.id },
+      data: {
+        email,
+        vitEmail: placeholder.vitEmail || email,
+        username,
+        displayName,
+        passwordHash,
+        isActive: true,
+      },
+      select: { id: true, email: true, username: true, displayName: true, role: true, totalPoints: true, createdAt: true },
+    });
+    const accessToken = signAccessToken({ sub: claimed.id, username: claimed.username, role: claimed.role });
+    const { raw: refreshToken } = await createRefreshToken(claimed.id);
+    return res.status(200).json({ success: true, data: { user: claimed, accessToken, refreshToken, claimed: true } });
+  }
+
+  // Normal uniqueness check for active users
   const exists = await prisma.user.findFirst({
     where: { OR: [{ email }, { username }] },
-    select: { email: true, username: true },
+    select: { email: true, username: true, isActive: true },
   });
   if (exists) {
     const field = exists.email === email ? "email" : "username";
+    // If existing is inactive placeholder but vitEmail differs, give helpful message
+    if (!exists.isActive) {
+      return res.status(409).json({ success: false, error: `${field} belongs to an inactive placeholder. Try logging in with that email or contact admin.` });
+    }
     return res.status(409).json({ success: false, error: `${field} already taken` });
   }
 
@@ -44,10 +83,14 @@ router.post("/login", async (req, res) => {
   const { login, password } = parsed.data;
   const isEmail = login.includes("@");
 
+  const lowerLogin = login.toLowerCase();
   const user = await prisma.user.findFirst({
-    where: isEmail ? { email: login.toLowerCase() } : { username: login.toLowerCase() },
+    where: isEmail
+      ? { OR: [{ email: lowerLogin }, { vitEmail: lowerLogin }] }
+      : { username: lowerLogin },
   });
-  if (!user || !user.isActive) return res.status(401).json({ success: false, error: "Invalid credentials" });
+  if (!user) return res.status(401).json({ success: false, error: "Invalid credentials" });
+  if (!user.isActive) return res.status(401).json({ success: false, error: "Account inactive — complete registration via 'claim' or contact admin" });
 
   const ok = await verifyPassword(password, user.passwordHash);
   if (!ok) return res.status(401).json({ success: false, error: "Invalid credentials" });

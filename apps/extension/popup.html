@@ -6,7 +6,14 @@
 </head>
 <body>
   <h1>FFCS Track</h1>
-  <p>Meet attendance auto-captures on <b>meet.google.com</b>. Check <a href="http://localhost:3004/admin/attendance" target="_blank">Attendance</a>.</p>
+  <p>Meet attendance auto-captures on <b>meet.google.com</b>. Check <a id="ffcs-attendance-link" href="http://localhost:3004/admin/attendance" target="_blank">Attendance</a>.</p>
+  <script>
+    try { chrome.storage.local.get(["ffcs_frontend_base"], (res) => {
+      const base = (res.ffcs_frontend_base || "http://localhost:3004").replace(/\/$/, "");
+      const a = document.getElementById("ffcs-attendance-link");
+      if (a) a.href = `${base}/admin/attendance`;
+    }); } catch {}
+  </script>
   <p style="font-size:11px;color:#999">Parses VIT RegNo from names, compares vs FFCS master.</p>
   <script src="popup.js"></script>
 </body>

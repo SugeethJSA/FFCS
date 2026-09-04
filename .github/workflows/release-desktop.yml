@@ -20,21 +20,25 @@ jobs:
       - name: Install Tauri deps (ubuntu)
         if: matrix.os == 'ubuntu-latest'
         run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
-      - run: pnpm install
-      - run: pnpm --filter ffcs build
-      - run: pnpm --filter ffcs-extension zip || echo "no zip script"
+      - run: pnpm install --frozen-lockfile
+      - name: Generate Prisma client
+        run: pnpm --filter api db:generate
+      - name: Build Web (for Tauri frontendDist)
+        run: pnpm --filter web build
+      - name: Zip extension (optional)
+        run: pnpm --filter extension build || echo "no zip script"
       - name: Build Tauri
-        run: pnpm --filter ffcs-desktop build
+        run: pnpm --filter desktop build
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: ffcs-track-${{ matrix.os }}
-          path: FFCS/ffcs-desktop/src-tauri/target/release/bundle/**/*
+          path: apps/desktop/src-tauri/target/release/bundle/**/*
       - name: Release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: FFCS/ffcs-desktop/src-tauri/target/release/bundle/**/*
+          files: apps/desktop/src-tauri/target/release/bundle/**/*
 
   updater:
     needs: build
