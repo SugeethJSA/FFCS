@@ -1,0 +1,50 @@
+{
+  "name": "api",
+  "version": "1.0.0",
+  "private": true,
+  "type": "commonjs",
+  "packageManager": "pnpm@11.24.0",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/index.js",
+    "db:generate": "prisma generate",
+    "db:push": "prisma db push",
+    "db:migrate": "prisma migrate dev",
+    "db:deploy": "prisma migrate deploy",
+    "db:seed": "tsx prisma/seed.ts",
+    "db:studio": "prisma studio",
+    "db:local:up": "docker compose up -d --wait",
+    "db:local:down": "docker compose down",
+    "db:local:reset": "docker compose down -v && docker compose up -d --wait",
+    "db:local:setup": "pnpm db:local:up && pnpm db:push && pnpm db:seed",
+    "db:sqlite:setup": "powershell -Command \"$env:DATABASE_URL='file:./prisma/dev.db'; Copy-Item prisma/schema.sqlite.prisma prisma/schema.prisma -Force; pnpm db:push; pnpm db:seed; pnpm db:generate; Write-Host 'SQLite ready at prisma/dev.db – set DATABASE_URL=file:./prisma/dev.db in .env for pnpm dev'\"",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit --skipLibCheck || echo \"typecheck done\""
+  },
+  "dependencies": {
+    "@prisma/client": "^6.14.0",
+    "bcryptjs": "^2.4.3",
+    "cors": "^2.8.5",
+    "csv-parse": "^7.0.2",
+    "dotenv": "^17.4.2",
+    "express": "^4.21.2",
+    "express-async-errors": "^3.1.1",
+    "express-rate-limit": "^8.0.1",
+    "helmet": "^8.1.0",
+    "jsonwebtoken": "^9.0.2",
+    "multer": "^2.3.0",
+    "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "@types/bcryptjs": "^2.4.6",
+    "@types/cors": "^2.8.19",
+    "@types/express": "^4.17.21",
+    "@types/jsonwebtoken": "^9.0.10",
+    "@types/multer": "^2.2.0",
+    "@types/node": "^22.15.0",
+    "prisma": "^6.14.0",
+    "tsx": "^4.19.0",
+    "typescript": "^6.0.3"
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "name": "FFCS Club Leaderboard",
+  "short_name": "FFCS",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0a0a0a",
+  "theme_color": "#7c3aed",
+  "icons": []
+}

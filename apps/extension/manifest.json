@@ -1,0 +1,40 @@
+{
+  "manifest_version": 3,
+  "name": "FFCS Track | Meet Attendance",
+  "version": "1.0.0",
+  "description": "Auto-track Google Meet attendance for FFCS Club — parses VIT Register No, compares vs FFCS master, awards points.",
+  "author": "AmazeContinuityProjects",
+  "action": {
+    "default_icon": {
+      "128": "icons/ffcs-logo-128.png",
+      "16": "icons/ffcs-logo-16.png",
+      "32": "icons/ffcs-logo-32.png",
+      "48": "icons/ffcs-logo-48.png"
+    },
+    "default_popup": "popup.html",
+    "default_title": "FFCS Track"
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "js": ["attendance.js"],
+      "matches": ["https://meet.google.com/*"],
+      "run_at": "document_idle"
+    },
+    {
+      "js": ["save.js"],
+      "matches": ["http://localhost:3004/*", "http://localhost:3000/*", "https://*.ffcs.club/*", "https://ffcs.club/*"],
+      "run_at": "document_idle"
+    }
+  ],
+  "permissions": ["storage"],
+  "host_permissions": ["https://meet.google.com/*", "http://localhost:4000/*", "https://*.ffcs.club/*"],
+  "icons": {
+    "128": "icons/ffcs-logo-128.png",
+    "16": "icons/ffcs-logo-16.png",
+    "32": "icons/ffcs-logo-32.png",
+    "48": "icons/ffcs-logo-48.png"
+  }
+}

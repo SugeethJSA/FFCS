@@ -1,0 +1,20 @@
+{
+  "name": "ffcs-monorepo",
+  "private": true,
+  "version": "1.0.0",
+  "packageManager": "pnpm@11.24.0",
+  "engines": { "node": ">=18" },
+  "scripts": {
+    "build": "turbo run build --filter=web --filter=api",
+    "dev": "turbo run dev --filter=web --filter=api",
+    "lint": "turbo lint",
+    "typecheck": "turbo typecheck --filter=web --filter=api",
+    "db:generate": "pnpm --filter api db:generate",
+    "db:push": "pnpm --filter api db:push",
+    "db:seed": "pnpm --filter api db:seed"
+  },
+  "devDependencies": {
+    "turbo": "^2.0.6",
+    "typescript": "^6.0.3"
+  }
+}

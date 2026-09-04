@@ -1,0 +1,10 @@
+{
+  "name": "extension",
+  "version": "1.0.0",
+  "private": true,
+  "description": "FFCS Track browser extension",
+  "scripts": {
+    "build": "echo 'zip manifest'",
+    "lint": "echo 'no lint'"
+  }
+}

@@ -1,0 +1,198 @@
+// Alternative local-only schema – zero-dependency (no Docker/Postgres)
+// Usage (only if you don't want Docker Postgres):
+//   1. cp prisma/schema.sqlite.prisma prisma/schema.prisma
+//   2. set in .env: DATABASE_URL="file:./dev.db"
+//   3. pnpm db:push && pnpm db:seed
+// Note: This is SQLite – switch back to prisma/schema.prisma (postgresql) before deploying to Neon/Render.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  MEMBER
+  ADMIN
+  SUPER_ADMIN
+}
+
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  username      String    @unique
+  displayName   String
+  passwordHash  String
+  role          Role      @default(MEMBER)
+  avatarUrl     String?
+  totalPoints   Int       @default(0)
+  isActive      Boolean   @default(true)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  registerNo    String?   @unique
+  vitEmail      String?   @unique
+  school        String?
+  programme     String?
+  mobile        String?
+  isToastmaster Boolean   @default(false)
+  club          String?
+  pointsReceived Point[] @relation("Recipient")
+  pointsAwarded  Point[] @relation("Awardee")
+  refreshTokens  RefreshToken[]
+  memberProfile MemberProfile?
+  importBatches MemberImportBatch[] @relation("ImportBatchCreator")
+  attendanceSessions AttendanceSession[]
+  attendanceRecords AttendanceRecord[]
+  inPersonAttendees InPersonAttendee[]
+}
+
+model Category {
+  id          String  @id @default(cuid())
+  name        String  @unique
+  slug        String  @unique
+  description String?
+  color       String?
+  icon        String?
+  createdAt   DateTime @default(now())
+  points      Point[]
+  attendanceSessions AttendanceSession[]
+}
+
+model Point {
+  id          String   @id @default(cuid())
+  recipientId String
+  recipient   User     @relation("Recipient", fields: [recipientId], references: [id], onDelete: Cascade)
+  awardedById String
+  awardedBy   User     @relation("Awardee", fields: [awardedById], references: [id], onDelete: Restrict)
+  amount      Int
+  reason      String
+  where       String?
+  how         String?
+  categoryId  String
+  category    Category @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  metadata    Json?
+  createdAt   DateTime @default(now())
+}
+
+model RefreshToken {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String   @unique
+  expiresAt DateTime
+  revoked   Boolean  @default(false)
+  createdAt DateTime @default(now())
+}
+
+model MemberProfile {
+  id          String   @id @default(cuid())
+  userId      String   @unique
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  programme   String
+  registerNo  String   @unique
+  name        String
+  school      String
+  email       String
+  mobile      String?
+  isToastmaster Boolean @default(false)
+  club        String?
+  importBatchId String?
+  importBatch MemberImportBatch? @relation(fields: [importBatchId], references: [id], onDelete: SetNull)
+  updatedAt   DateTime @updatedAt
+  createdAt   DateTime @default(now())
+}
+
+model MemberImportBatch {
+  id        String   @id @default(cuid())
+  fileName  String
+  rowCount  Int
+  createdById String
+  createdBy User @relation("ImportBatchCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  createdAt DateTime @default(now())
+  profiles  MemberProfile[]
+}
+
+model AttendanceSession {
+  id          String   @id @default(cuid())
+  title       String
+  type        String
+  meetCode    String?
+  meetLink    String?
+  venue       String?
+  date        DateTime
+  startTime   DateTime
+  endTime     DateTime?
+  createdById String
+  createdBy   User     @relation(fields: [createdById], references: [id], onDelete: Restrict)
+  allowedEmailDomains String?
+  allowedEmails String?
+  status      String   @default("OPEN")
+  categoryId  String?
+  category    Category? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  points      Int?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  records     AttendanceRecord[]
+  inPersonEvent InPersonEvent?
+}
+
+model AttendanceRecord {
+  id          String   @id @default(cuid())
+  sessionId   String
+  session     AttendanceSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  userId      String?
+  user        User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  rawName     String
+  cleanName   String?
+  registerNo  String?
+  email       String?
+  joinTime    DateTime?
+  leaveTime   DateTime?
+  attendedDuration Int?
+  checkInTime DateTime?
+  registrationTime DateTime?
+  isPresent   Boolean  @default(false)
+  source      String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([sessionId, registerNo])
+  @@unique([sessionId, email])
+  @@index([sessionId])
+  @@index([userId])
+  @@index([registerNo])
+  @@index([isPresent])
+}
+
+model InPersonEvent {
+  id          String   @id @default(cuid())
+  slug        String   @unique
+  title       String
+  sessionId   String   @unique
+  session     AttendanceSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  venue       String?
+  date        DateTime
+  startTime   DateTime
+  endTime     DateTime?
+  allowedEmailDomains String?
+  allowedEmails String?
+  createdById String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  attendees   InPersonAttendee[]
+}
+
+model InPersonAttendee {
+  id               String   @id @default(cuid())
+  eventId          String
+  event            InPersonEvent @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  userId           String
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  checkInTime      DateTime?
+  registrationTime DateTime @default(now())
+
+  @@unique([userId, eventId])
+}

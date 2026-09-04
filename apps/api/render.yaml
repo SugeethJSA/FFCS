@@ -1,0 +1,20 @@
+# Free deploy on Render.com – connect your FFCS-backend repo
+# Docs: https://render.com/docs/deploy-to-render
+services:
+  - type: web
+    name: ffcs-backend
+    env: node
+    plan: free
+    buildCommand: pnpm install --frozen-lockfile && pnpm db:generate && pnpm build
+    startCommand: pnpm start
+    healthCheckPath: /health
+    autoDeploy: false
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: JWT_SECRET
+        generateValue: true
+      - key: DATABASE_URL
+        sync: false # set in Render dashboard – use Neon pooled URL
+      - key: CORS_ORIGIN
+        sync: false # e.g. https://youruser.github.io
